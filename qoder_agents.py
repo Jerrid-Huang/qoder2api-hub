@@ -243,8 +243,25 @@ def _yaml_upsert_at(lines, start, end, indent, keys, value_json):
     return lines
 
 
+def _yaml_scalar(value):
+    """把值渲染成**始终带双引号**的 YAML 标量。
+
+    YAML 1.2 core schema 会把 `13638719007`、`007`、`1e5`、`0x1f`、`-1`、
+    `true`、`false`、`null`、`~` 这类裸值解析成非字符串类型。DSH 的
+    credentials-local 对 `refs` 的值做硬校验（typeof !== "string" 直接抛
+    TypeError），写入一个纯数字 Key 就会让 `credentials` 插件不激活，
+    进而 connection / authorization / 全部 tauri 与 mcp 插件级联 waiting，
+    dsh 完全无法启动（issue #103）。
+
+    JSON 的双引号标量同时是合法的 YAML double-quoted scalar，转义规则也
+    覆盖换行、引号、反斜杠与控制字符，比手写 `'%s'` 安全。
+    """
+    return json.dumps(str(value), ensure_ascii=False)
+
+
 def yaml_refs_upsert(text, key, value):
     """Upsert 顶层 `refs:` 块内的键（DSH credentials.yaml 专用）。"""
+    rendered = _yaml_scalar(value)
     lines = text.split("\n")
     idx = 0
     while idx < len(lines):
@@ -261,17 +278,17 @@ def yaml_refs_upsert(text, key, value):
             while j < end:
                 if lines[j].strip() and _yaml_indent(lines[j]) == 2 \
                         and _yaml_key(lines[j]) == key:
-                    lines[j] = "  %s: %s" % (key, value)
+                    lines[j] = "  %s: %s" % (key, rendered)
                     return "\n".join(lines)
                 j += 1
             insert = _yaml_insert_point(lines, idx + 1, end, 2)
-            lines[insert:insert] = ["  %s: %s" % (key, value)]
+            lines[insert:insert] = ["  %s: %s" % (key, rendered)]
             return "\n".join(lines)
         idx += 1
     while lines and not lines[-1].strip():
         lines.pop()
     lines.append("refs:")
-    lines.append("  %s: %s" % (key, value))
+    lines.append("  %s: %s" % (key, rendered))
     return "\n".join(lines) + "\n"
 
 
